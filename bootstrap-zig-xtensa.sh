@@ -35,6 +35,7 @@ ROOT_DIR=$(pwd)
 HOST_INSTALL_DIR=$ROOT_DIR/out/host
 TARGET_INSTALL_DIR=$ROOT_DIR/out/$TARGET-$MCPU
 FINAL_INSTALL_DIR=$ROOT_DIR/out/zig-$TARGET-$MCPU
+ZIG=$HOST_INSTALL_DIR/bin/zig
 
 echo "========================================================="
 echo "Building Zig bootstrap with the following configuration:"
@@ -101,9 +102,6 @@ cmake $ROOT_DIR/zig \
 echo "Building Zig compiler (host, C)..."
 cmake --build . --target install
 echo "Zig compiler (host) build complete."
-
-# Define ZIG variable for subsequent builds
-ZIG=$HOST_INSTALL_DIR/bin/zig
 
 # Step 3: Build zlib (target)
 echo "[3/6] Building zlib for $TARGET..."

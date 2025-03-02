@@ -663,3 +663,51 @@ And, it succeed!
 ```
 $ROOTDIR/out/zig-$TARGET-$MCPU/zig build-obj -femit-asm test.zig -target xtensa-freestanding-none -mcpu=esp32
 ```
+
+Now I have a working Zig toolchain that can compile Zig code for ESP32!
+
+## Summary: Required Changes to Support Xtensa ESP32
+
+To successfully add Xtensa ESP32 support to Zig, you need to make the following changes to the Zig codebase:
+
+1. **Update CPU Features**: Run the `update_cpu_features.zig` tool to synchronize Zig's CPU features with LLVM's target description for Xtensa
+
+   ```sh
+   ./update_cpu_features /path/to/llvm-tblgen /path/to/llvm-project /path/to/zig
+   ```
+
+   This will update `lib/std/Target/xtensa.zig` to include ESP32 CPU support.
+
+2. **Add Missing LLVM Libraries**: Modify `build.zig` to include the following Xtensa-specific LLVM libraries:
+
+   ```zig
+   "LLVMXtensaAsmParser",
+   "LLVMXtensaDesc",
+   "LLVMXtensaInfo",
+   "LLVMXtensaCodeGen",
+   "LLVMXtensaDisassembler",
+   ```
+
+3. **Add Missing LLVM AsmPrinter Function**: Add this function declaration to `src/codegen/llvm/bindings.zig`:
+
+   ```zig
+   pub extern fn LLVMInitializeXtensaAsmPrinter() void;
+   ```
+
+4. **Update LLVM Target Initialization**: Modify the Xtensa case in `src/codegen/llvm.zig` to include the AsmPrinter:
+
+   ```zig
+   .xtensa => {
+       if (build_options.llvm_has_xtensa) {
+           llvm.LLVMInitializeXtensaTarget();
+           llvm.LLVMInitializeXtensaTargetInfo();
+           llvm.LLVMInitializeXtensaTargetMC();
+           llvm.LLVMInitializeXtensaAsmPrinter(); // Add this line
+           llvm.LLVMInitializeXtensaAsmParser();
+       }
+   },
+   ```
+
+5. **Build with Xtensa Support**: When building Zig, make sure to use the `-Dllvm-has-xtensa` build option.
+
+After making these changes, Zig should be able to correctly recognize the ESP32 CPU and generate code for the Xtensa architecture.
