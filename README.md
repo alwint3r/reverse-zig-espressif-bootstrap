@@ -374,7 +374,7 @@ $ZIG build \
 ```
 
 The Zig toolchain pointed by environment variable `$ZIG` was compiled using CMake, the cross-compiled Zig was built using Zig Build System as incidated by the `$ZIG build` command.
-It uses the targetinstallation directories to search for its dependencies, especially LLVM and zstd, in the `$ROOTDIR/out/$TARGET-$MCPU` directory.
+It uses the target installation directories to search for its dependencies, especially LLVM and zstd, in the `$ROOTDIR/out/$TARGET-$MCPU` directory.
 
 Here we use the `-Dflat` argument to make the Zig toolchain directory structured as follow:
 
@@ -435,4 +435,22 @@ They said, that the `build.zig` file is missing the following libraries:
 ```
 
 They're right, if we inspect the failing command, we don't see those libraries.
+We need to add those libraries to the `llvm_libs` in the `build.zig` file.
+After this we can re-run the Zig cross-compilation process again and see that it now compiles successfully.
 
+Hooray? No.
+
+Try compiling the test code again with `-mcpu=esp32`
+
+```
+./out/zig-$TARGET-$MCPU/zig cc -S -O1 -target xtensa-freestanding-none -mcpu=esp32 test.c
+```
+
+Then we still get the following error:
+
+```
+info: available CPUs for architecture 'xtensa':
+ generic
+
+error: unknown CPU: 'esp32'
+```
