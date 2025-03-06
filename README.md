@@ -2,36 +2,33 @@
 
 ## Background
 
-If you are not coming from an embedded systems or IoT background, you must be wondering what is this all about and why did I do this.
+If you're not familiar with embedded systems or IoT, here's some context about why this matters.
 
-Espressif is a company in China that makes chips mainly for IoT applications.
-They have a very popular line of chips called ESP32, which is used in many projects and available worldwide since around 2016.
-The ESP32 is a dual-core microcontroller with Wi-Fi and Bluetooth capabilities, making it top choice for IoT applications among hobbyists and professionals alike.
-Espressif develop and maintain an SDK called ESP-IDF (Espressif IoT Development Framework) that is used to develop applications.
-They also provide an Arduino core that allows hobbyists and makers to use the Arduino framework and libraries to develop applications.
+Espressif is a Chinese semiconductor company known for their ESP32 microcontroller series. Released in 2016, the ESP32 has become widely popular in both hobby and professional IoT projects due to its dual-core processor and built-in Wi-Fi/Bluetooth capabilities.
 
-Both the ESP-IDF and Arduino core are written in C and C++. While C and C++ are the common languages used in embedded systems, with the rise of
-Rust and Zig, I wondered if it was possible to use Zig to develop applications for the ESP32.
-Espressif already have a working Rust toolchain based on their fork of the LLVM project, and per today we can use Rust to target ESP32 chips, but I'm not interested in Rust at this point.
-Since both Zig and Rust uses LLVM backend to generate code for the target machines, so it should be possible to some extent to use Zig as one of the language for
-developing embedded systems or IoT application for ESP32 chips.
+The main development tools for ESP32 are:
+- ESP-IDF: Espressif's official IoT Development Framework
+- Arduino core: A framework that lets makers use familiar Arduino libraries
+
+Both frameworks are C/C++-based, which is typical for embedded systems. However, newer languages like Rust and Zig are gaining traction. Espressif already supports Rust through their LLVM fork, making it possible to write ESP32 applications in Rust.
+
+Since Zig also uses LLVM for code generation, it should theoretically be possible to use Zig for ESP32 development as well. This exploration aims to make that possible.
 
 ## Zig for ESP32
 
-Yes, someone has already done it and it's available at [github.com/kassane/zig-espressif-bootstrap](github.com/kassane/zig-espressif-bootstrap).
-It's a fork of the official repo for bootstrapping Zig for different machines (e.g., you're on Apple Silicon Mac but you want to distribute Zig for x86 Linux).
-The main difference between those repo is of course the availability of the Xtensa in the LLVM backend.
-The zig-espressif-bootstrap uses Espressif's port of LLVM project to build the Zig toolchain.
-Sound simple? Well...
+## Existing Solution: zig-espressif-bootstrap
 
-Unfortunately, Espressif's fork of LLVM project is NOT the only thing needed to make Zig compiler able to generate code for the Xtensa target.
-To make it even worse, the zig-espressif-bootstrap's maintainer does not provide a clear documentation on how he did it.
-But, they did give some clue somewhere else.
-This led me to a journey with lots of headaches and a relieving sense of victory after figuring it out.
+There's already a working solution available at [github.com/kassane/zig-espressif-bootstrap](https://github.com/kassane/zig-espressif-bootstrap).
 
-So, if you're looking to get a working Zig compiler that has a support for Xtensa architecture, go use the zig-espressif-bootstrap.
-But, if you're like me, curious about how things works under the hood, then read on.
+This repository is a fork of the official Zig bootstrap repo but with added support for Espressif's Xtensa architecture. It uses Espressif's fork of the LLVM project to build a Zig toolchain capable of targeting ESP32 devices.
 
+While the solution exists, there are some important caveats:
+
+1. Simply including Espressif's LLVM fork is not sufficient to make Zig generate code for Xtensa targets
+2. The repository lacks comprehensive documentation on the implementation details
+3. Several non-obvious modifications are required to make everything work correctly
+
+If you just need a working Zig compiler with Xtensa support, using the zig-espressif-bootstrap repository directly is your best option. However, if you're interested in understanding how the integration works under the hood, the sections below explain the technical journey.
 ## Building Zig From Source
 
 ### Simplest Way
@@ -53,25 +50,21 @@ cmake -B build -S .
 cmake --build build --target install
 ```
 
-Bootstrapping for different machine and adding experimental LLVM target (like Xtensa) is different kind of beast, though.
+Bootstrapping for different machine architectures and adding experimental LLVM target support (like Xtensa) is much more complex, as detailed in the following sections.
 
-### Bootstrapping for Different Machine
+## Bootstrapping for Different Machine Architectures
 
-Using zig-bootstrap repo involves different kind of activity, here's the summary:
+When building Zig for a different architecture (like adding Xtensa support for ESP32), we need to go through a multi-stage bootstrap process. This is more complex than a standard build and involves:
 
-1. Build the LLVM project including LLVM backend, LLD, and Clang with few features turned off using the system's C and C++ compiler.
-2. Build the Zig cross compiler with the previously built LLVM using the system's C and C++ compiler.
-3. Build the zlib and zstd for the target machine using Zig cross compiler.
-4. Rebuild the LLVM using Zig cross compiler for the target machine.
-5. Rebuild the Zig using the rebuilt LLVM and the Zig cross compiler in the previous step for the target machine.
+1. Building LLVM (including backend, LLD, and Clang) with the host compiler 
+2. Building a host Zig compiler with that LLVM
+3. Using that Zig compiler to cross-compile dependencies (zlib, zstd) for the target architecture
+4. Using the cross-compiler to build LLVM again, but targeting the destination architecture
+5. Finally building the full Zig toolchain for the target architecture
 
-You can confirm this by looking at the shell script (`build`) in the [ziglang/zig-bootstrap](github.com/ziglang/zig-bootstrap) repo.
-The zig-bootstrap repo, both the upstream and the fork that includes Xtensa support, provides all dependencies source code locally (except CMake and the C and C++ compiler).
-This is convenient because we don't need to get and install all of those separately.
+The [ziglang/zig-bootstrap](https://github.com/ziglang/zig-bootstrap) repository handles this process with its build script. It includes all source dependencies locally (except for CMake and the C/C++ compiler), making the bootstrap process more manageable.
 
-At the end of the step, we'll have a working Zig toolchain for the target machine.
-Sounds good, right?
-Now here comes the part where I got hours of headaches.
+While this process works well for established architectures, adding support for experimental architectures like Xtensa presents additional challenges that aren't immediately obvious, as we'll see in the following sections.
 
 ### Journey: Building with Xtensa Support
 
@@ -81,7 +74,7 @@ Building LLVM with Xtensa support requires an additional CMake option to be pass
 -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=Xtensa
 ```
 
-Here's an excerpt from zig-espressif-bootstrap for the complete CMake options:
+Here is the complete command and variables for building LLVM using CMake.
 
 ```sh
 cmake "$ROOTDIR/llvm" \
@@ -119,12 +112,9 @@ cmake "$ROOTDIR/llvm" \
   -DCLANG_TOOL_LIBCLANG_BUILD=OFF
 ```
 
-The above script covers the step number 1 that we described in the [Bootstrapping for Different Machine](#bootstrapping-for-different-machine) section.
+For LLVM, adding the `-DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=Xtensa` is enough. But it's not enough for Zig as we'll see in a minute.
 
-For LLVM, adding the `-DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=Xtensa` is enough.
-But, is it enough for Zig? That will be answered later on.
-
-Moving to step 2, we can build the Zig toolchain with the previously built LLVM.
+Then we build Zig using CMake and the previously built LLVM.
 
 ```sh
 cmake "$ROOTDIR/zig" \
@@ -135,7 +125,8 @@ cmake "$ROOTDIR/zig" \
 cmake --build . --target install
 ```
 
-Nothing strange, but here we build Zig without regard of the Xtensa because we only need Zig as a cross-compiler here. Although we can try the code generation using `zig cc` with the following code:
+This step will produce a Zig toolchain that can be used as a cross-compiler.
+We can verify its cross-compiling capability by using its built-in C compiler.
 
 ```c
 // filename: test.c
@@ -148,7 +139,7 @@ int add(int a, int b) {
 $ROOT_DIR/out/host/bin/zig cc -S test.c -target xtensa-frestanding-none -O1
 ```
 
-Then it will produce the following file, truncated for brevity:
+Above command produces an assembly file and here's an excerpt of that file.
 
 ```asm
         .text
@@ -171,7 +162,8 @@ add:                                    # @add
         retw
 ```
 
-But, this is for _generic_ CPU, not specific to ESP32. If we attempt to add `-mcpu=esp32` option like the following shell script, it will yield error.
+By default Zig will use the `generic` CPU for Xtensa architecture.
+Attempting to use `esp32` as the CPU target will produce the following error:
 
 ```sh
 $ROOT_DIR/out/host/bin/zig cc -S test.c -target xtensa-frestanding-none -O1 -mcpu=esp32
@@ -183,8 +175,7 @@ info: available CPUs for architecture 'xtensa':
 
 error: unknown CPU: 'esp32'
 ```
-
-Interestingly, if we build LLVM and Clang that enables Xtensa and compile the same `test.c` code using clang, it will compile successfully and generate the following assembly code.
+Interestingly, compiling the same code using Clang and LLVM built with Xtensa target enabled will successfully produce assembly code.
 
 ```sh
 # Build clang out of curiosity
@@ -219,10 +210,9 @@ add:                                    # @add
         .addrsig
 ```
 
-This is part of the problem that caused headache for at least two straight hours for me, but we'll revisit it later down the line.
-Mainly, because I didn't really understand how LLVM works, and I didn't understand how Zig uses LLVM under the hood. In fact, I have yet to fully understand how they work.
+This issue is related with how Zig implements the code generation for specific target such as Xtensa for both C and Zig code compilation.
 
-Anyway, compiling zstd and zlib is pretty straightforward. Here we use the Zig cross compiler to compile those C projects as static library.
+Then we used the Zig cross compiler to build the. zstd and zlib as static libraries for re-building LLVM later on.
 
 ```sh
 # Now we have Zig as a cross compiler.
@@ -293,8 +283,8 @@ $ZIG build-lib \
   "$ROOTDIR/zstd/lib/dictBuilder/cover.c"
 ```
 
-Then, we use the static libraries to rebuild the LLVM for the target machine. This build will use the zstd and zlib, and also uses llvm-tblgen and clang-tblgen target-specific code generation.
-We'll come back to the tablegen later on (psst, it's kind of related to the esp32 not appearing as a valid CPU for Xtensa target).
+Then we re-build LLVM for the target architecture using the Zig cross compiler.
+We'll need this LLVM as we build the Zig toolchain for the target architecture later on.
 
 ```sh
 mkdir -p "$ROOTDIR/out/build-llvm-$TARGET-$MCPU"
@@ -356,9 +346,7 @@ cmake "$ROOTDIR/llvm" \
 cmake --build . --target install
 ```
 
-Building LLVM for the second time in this entire process yields successful result, the number of object files generated is even lesser than the first LLVM build.
-
-Then in the final step, we build the Zig toolchain using Zig with the previously built LLVM.
+Then we build the Zig toolchain for the target architecture using Zig cross compiler.
 
 ```sh
 $ZIG build \
@@ -373,10 +361,8 @@ $ZIG build \
   -Dversion-string="$ZIG_VERSION"
 ```
 
-The Zig toolchain pointed by environment variable `$ZIG` was compiled using CMake, the cross-compiled Zig was built using Zig Build System as incidated by the `$ZIG build` command.
-It uses the target installation directories to search for its dependencies, especially LLVM and zstd, in the `$ROOTDIR/out/$TARGET-$MCPU` directory.
-
-Here we use the `-Dflat` argument to make the Zig toolchain directory structured as follow:
+This build process uses Zig Build System as opposed to the cross compiler using CMake.
+The `-Dflat` argument will change the structure of the built toolchain to the following structure:
 
 ```
 zig-$TARGET-$MCPU
@@ -388,13 +374,13 @@ zig-$TARGET-$MCPU
 └── zig
 ```
 
-Then, we used the `ReleaseSafe` build mode.
-By definition, that mode ensures that whatever executable produced by the Zig toolchain has runtime safety checks.
-One interesting flag is the `-Dllvm-has-xtensa`, it enables the LLVM target for Zig.
+We used the `ReleaseSafe` build mode to include runtime safety checks in the produced Zig toolchain.
 
-Long story short, the compilation failed at linking step.
-The error message said that it missed the following symbols and where it was referenced
+Then we enable the Xtensa target in Zig by providing the `-Dllvm-has-xtensa` argument.
 
+#### Missing LLVM Xtensa Libraries in Zig
+
+The build process failed at the linking step with the following missing symbols:
 ```
 error: undefined symbol: _LLVMInitializeXtensaAsmParser
     note: referenced by out/aarch64-macos-apple_m3/lib/liblldELF.a(Driver.cpp.o):__ZN4llvm23InitializeAllAsmParsersEv
@@ -412,19 +398,16 @@ error: undefined symbol: _LLVMInitializeXtensaTargetMC
     note: referenced by zig/.zig-cache/o/096f4ec3665323bac559ccb907465c05/zig.o:_codegen.llvm.initializeLLVMTarget
 ```
 
-It seems like the `$ZIG` cross compiler was missing the symbols related to Xtensa target from LLVM.
-The symbols should be available since we enabled the Xtensa target on LLVM.
-
-More on the failing command:
+Here's the command that fails at the linker step:
 
 ```
 out/host/bin/zig build-exe --stack 48234496 -cflags -std=c++17 -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -D_GNU_SOURCE -fno-exceptions -fno-rtti -fno-stack-protector -fvisibility-inlines-hidden -Wno-type-limits -Wno-missing-braces -Wno-comment -DNDEBUG=1 -- zig/src/zig_llvm.cpp zig/src/zig_clang.cpp zig/src/zig_llvm-ar.cpp zig/src/zig_clang_driver.cpp zig/src/zig_clang_cc1_main.cpp zig/src/zig_clang_cc1as_main.cpp -lclangFrontendTool -lclangCodeGen -lclangFrontend -lclangDriver -lclangSerialization -lclangSema -lclangStaticAnalyzerFrontend -lclangStaticAnalyzerCheckers -lclangStaticAnalyzerCore -lclangAnalysis -lclangASTMatchers -lclangAST -lclangParse -lclangAPINotes -lclangBasic -lclangEdit -lclangLex -lclangARCMigrate -lclangRewriteFrontend -lclangRewrite -lclangCrossTU -lclangIndex -lclangToolingCore -lclangExtractAPI -lclangSupport -lclangInstallAPI -llldMinGW -llldELF -llldCOFF -llldWasm -llldMachO -llldCommon -lLLVMWindowsManifest -lLLVMXRay -lLLVMLibDriver -lLLVMDlltoolDriver -lLLVMTextAPIBinaryReader -lLLVMCoverage -lLLVMLineEditor -lLLVMSandboxIR -lLLVMXCoreDisassembler -lLLVMXCoreCodeGen -lLLVMXCoreDesc -lLLVMXCoreInfo -lLLVMX86TargetMCA -lLLVMX86Disassembler -lLLVMX86AsmParser -lLLVMX86CodeGen -lLLVMX86Desc -lLLVMX86Info -lLLVMWebAssemblyDisassembler -lLLVMWebAssemblyAsmParser -lLLVMWebAssemblyCodeGen -lLLVMWebAssemblyUtils -lLLVMWebAssemblyDesc -lLLVMWebAssemblyInfo -lLLVMVEDisassembler -lLLVMVEAsmParser -lLLVMVECodeGen -lLLVMVEDesc -lLLVMVEInfo -lLLVMSystemZDisassembler -lLLVMSystemZAsmParser -lLLVMSystemZCodeGen -lLLVMSystemZDesc -lLLVMSystemZInfo -lLLVMSparcDisassembler -lLLVMSparcAsmParser -lLLVMSparcCodeGen -lLLVMSparcDesc -lLLVMSparcInfo -lLLVMRISCVTargetMCA -lLLVMRISCVDisassembler -lLLVMRISCVAsmParser -lLLVMRISCVCodeGen -lLLVMRISCVDesc -lLLVMRISCVInfo -lLLVMPowerPCDisassembler -lLLVMPowerPCAsmParser -lLLVMPowerPCCodeGen -lLLVMPowerPCDesc -lLLVMPowerPCInfo -lLLVMNVPTXCodeGen -lLLVMNVPTXDesc -lLLVMNVPTXInfo -lLLVMMSP430Disassembler -lLLVMMSP430AsmParser -lLLVMMSP430CodeGen -lLLVMMSP430Desc -lLLVMMSP430Info -lLLVMMipsDisassembler -lLLVMMipsAsmParser -lLLVMMipsCodeGen -lLLVMMipsDesc -lLLVMMipsInfo -lLLVMLoongArchDisassembler -lLLVMLoongArchAsmParser -lLLVMLoongArchCodeGen -lLLVMLoongArchDesc -lLLVMLoongArchInfo -lLLVMLanaiDisassembler -lLLVMLanaiCodeGen -lLLVMLanaiAsmParser -lLLVMLanaiDesc -lLLVMLanaiInfo -lLLVMHexagonDisassembler -lLLVMHexagonCodeGen -lLLVMHexagonAsmParser -lLLVMHexagonDesc -lLLVMHexagonInfo -lLLVMBPFDisassembler -lLLVMBPFAsmParser -lLLVMBPFCodeGen -lLLVMBPFDesc -lLLVMBPFInfo -lLLVMAVRDisassembler -lLLVMAVRAsmParser -lLLVMAVRCodeGen -lLLVMAVRDesc -lLLVMAVRInfo -lLLVMARMDisassembler -lLLVMARMAsmParser -lLLVMARMCodeGen -lLLVMARMDesc -lLLVMARMUtils -lLLVMARMInfo -lLLVMAMDGPUTargetMCA -lLLVMAMDGPUDisassembler -lLLVMAMDGPUAsmParser -lLLVMAMDGPUCodeGen -lLLVMAMDGPUDesc -lLLVMAMDGPUUtils -lLLVMAMDGPUInfo -lLLVMAArch64Disassembler -lLLVMAArch64AsmParser -lLLVMAArch64CodeGen -lLLVMAArch64Desc -lLLVMAArch64Utils -lLLVMAArch64Info -lLLVMOrcDebugging -lLLVMOrcJIT -lLLVMWindowsDriver -lLLVMMCJIT -lLLVMJITLink -lLLVMInterpreter -lLLVMExecutionEngine -lLLVMRuntimeDyld -lLLVMOrcTargetProcess -lLLVMOrcShared -lLLVMDWP -lLLVMDebugInfoLogicalView -lLLVMDebugInfoGSYM -lLLVMOption -lLLVMObjectYAML -lLLVMObjCopy -lLLVMMCA -lLLVMMCDisassembler -lLLVMLTO -lLLVMPasses -lLLVMHipStdPar -lLLVMCFGuard -lLLVMCoroutines -lLLVMipo -lLLVMVectorize -lLLVMLinker -lLLVMInstrumentation -lLLVMFrontendOpenMP -lLLVMFrontendOffloading -lLLVMFrontendOpenACC -lLLVMFrontendHLSL -lLLVMFrontendDriver -lLLVMExtensions -lLLVMDWARFLinkerParallel -lLLVMDWARFLinkerClassic -lLLVMDWARFLinker -lLLVMCodeGenData -lLLVMGlobalISel -lLLVMMIRParser -lLLVMAsmPrinter -lLLVMSelectionDAG -lLLVMCodeGen -lLLVMTarget -lLLVMObjCARCOpts -lLLVMCodeGenTypes -lLLVMIRPrinter -lLLVMInterfaceStub -lLLVMFileCheck -lLLVMFuzzMutate -lLLVMScalarOpts -lLLVMInstCombine -lLLVMAggressiveInstCombine -lLLVMTransformUtils -lLLVMBitWriter -lLLVMAnalysis -lLLVMProfileData -lLLVMSymbolize -lLLVMDebugInfoBTF -lLLVMDebugInfoPDB -lLLVMDebugInfoMSF -lLLVMDebugInfoDWARF -lLLVMObject -lLLVMTextAPI -lLLVMMCParser -lLLVMIRReader -lLLVMAsmParser -lLLVMMC -lLLVMDebugInfoCodeView -lLLVMBitReader -lLLVMFuzzerCLI -lLLVMCore -lLLVMRemarks -lLLVMBitstreamReader -lLLVMBinaryFormat -lLLVMTargetParser -lLLVMSupport -lLLVMDemangle -lz -I/opt/homebrew/opt/zstd/include -L/opt/homebrew/opt/zstd/lib -lzstd -fno-sanitize-thread -OReleaseSafe -target aarch64-macos -mcpu apple_m3 --dep aro --dep aro_translate_c --dep build_options -Mroot=zig/src/main.zig -Maro=zig/lib/compiler/aro/aro.zig --dep aro -Maro_translate_c=zig/lib/compiler/aro_translate_c.zig -Mbuild_options=zig/.zig-cache/c/17da5134cc20c237ea498d8a65707e3c/options.zig -lc++ -lc --cache-dir zig/.zig-cache --global-cache-dir /Users/alwin/.cache/zig --name zig -L out/aarch64-macos-apple_m3/lib -I out/aarch64-macos-apple_m3/include --zig-lib-dir out/host/lib/zig/ --listen=-
 ```
 
-This lengthy command provide one of two clues around the linking issue.
-The other clue is provided by the zig-espressif-bootstrap maintainer on Zig's upstream repository issue tracker. You can check it on this [comment](https://github.com/ziglang/zig/issues/5467#issuecomment-1951434376).
+This command provide a clue.
+The other  clue is given by the zig-espressif-bootstrap maintainer on Zig's repository [issue tracker](https://github.com/ziglang/zig/issues/5467#issuecomment-1951434376).
 
-They said, that the `build.zig` file is missing the following libraries:
+The LLVM libraries declaration in `build.zig` is missing the following libraries:
 
 ```
     "LLVMXtensaAsmParser",
@@ -434,19 +417,15 @@ They said, that the `build.zig` file is missing the following libraries:
     "LLVMXtensaDisassembler",
 ```
 
-They're right, if we inspect the failing command, we don't see those libraries.
-We need to add those libraries to the `llvm_libs` in the `build.zig` file.
-After this we can re-run the Zig cross-compilation process again and see that it now compiles successfully.
+Adding those libraries to the `llvm_libs` in the `build.zig` file solves the linker problem.
 
-Hooray? No.
+#### ESP32 Is Not Recognized
 
-Try compiling the test code again with `-mcpu=esp32`
+Compiling the test code for `esp32` CPU using the previously built Zig produces the same error.
 
 ```
 ./out/zig-$TARGET-$MCPU/zig cc -S -O1 -target xtensa-freestanding-none -mcpu=esp32 test.c
 ```
-
-Then we still get the following error:
 
 ```
 info: available CPUs for architecture 'xtensa':
@@ -455,10 +434,11 @@ info: available CPUs for architecture 'xtensa':
 error: unknown CPU: 'esp32'
 ```
 
-Well, this is what I mean by enabling Xtensa target for LLVM and using Espressif's fork of it was not enough.
-It seems like the targets on LLVM is not directly _mirrored_ by Zig.
-So I had to dig on Zig's targets and I found the following definition of the Xtensa target in `lib/std/Targets/xtensa.zig`.
+Enabling Xtensa target on Espressif's fork of LLVM was not enough.
 
+#### Updating Zig's Xtensa Targets Definition
+
+The target definition is available at `lib/std/Targets/xtensa.zig`.
 ```zig
 //! This file is auto-generated by tools/update_cpu_features.zig.
 
@@ -501,42 +481,35 @@ pub const cpu = struct {
 };
 ```
 
-I learned two things:
-
-- There's only `generic` CPU as expected, this file clearly was not _synced_ with Espressif's port of LLVM.
-- The very first line, `//! This file is auto-generated by tools/update_cpu_features.zig.`. Oh, there's a tool for that? Neat.
+This file shows that:
+- The CPUs are not synced with the Espressif's LLVM fork.
+- This file is auto-generated by `tools/update_cpu_features.zig`.
 
 We can use the `$ZIG build-exe` command to build the tool.
 
 ```sh
-./out/host/bin/zig build-exe zig/tools/update_cpu_features.zig
+$ZIG build-exe zig/tools/update_cpu_features.zig
 ```
 
-It will produce the update_cpu_features executable which upon execution without additional arguments yield the following output:
+Then we can use the `update_cpu_features` tool.
 
 ```
-Usage: ./update_cpu_features /path/to/llvm-tblgen /path/git/llvm-project /path/git/zig [zig_name filter]
-
-Updates lib/std/target/<target>.zig from llvm/lib/Target/<Target>/<Target>.td .
-
-On a less beefy system, or when debugging, compile with -fsingle-threaded.
+./update_cpu_features out/build-llvm-TARGET-$MCPU/bin/llvm-tblgen . zig
 ```
 
-The first argument to the command can be provided as `out/build-llvm-$TARGET-$MCPU/bin/llvm-tblgen`.
-The second argument is a path to directory that has a LLVM project directory. If you're on the zig-bootstrap project directory we can use `.` as the path to the directory. Lastly, we provide the path to the zig source code.
+The first argument is the path to llvm-tblgen executable.
+The second argument is the path to the directory that contains `llvm` directory.
+The third argument is the path to the zig source code.
 
-If we successfully updated the CPU features, we can see now that the `lib/std/Target/xtensa.zig` is now synchronized with its LLVM counterpart.
+The Xtensa target will be updated and synced with its LLVM counterpart once we run the tool.
 
-We can now rebuild the Zig.
-But we have to make sure that we removed the previously built Zig and cleared the cache.
+Then we can rebuild the Zig cross compiler and the Zig toolchain for the target architecture.
+We need to make sure that the cache are cleared and the previous build result are deleted.
 
 ```sh
 rm -rf out/zig-$TARGET-$MCPU
 rm -rf zig/.zig-cache
 ```
-
-Here we need to rebuild the Zig cross-compiler and the final Zig toolchain.
-So we have to repeat the step 2 and the final step.
 
 ```sh
 cd $ROOTDIR/build-zig-host
@@ -547,8 +520,6 @@ cmake "$ROOTDIR/zig" \
   -DZIG_VERSION="$ZIG_VERSION"
 cmake --build . --target install
 ```
-
-and
 
 ```sh
 cd $ROOTDIR/zig
@@ -564,9 +535,10 @@ $ZIG build \
   -Dversion-string="$ZIG_VERSION"
 ```
 
-I encountered memory error on the last step.
-Somehow the build process consumed more memory than I anticipated.
-When the error appear, I just repeated the command and the Zig toolchain was compiled successfully.
+I encountered exceeded maximum memory usage error on the last step.
+The error disappear if we re-run the Zig build command.
+
+#### Fixing LLVM Bindings and Xtensa Target Initialization
 
 Testing the Zig C compiler again, we can now generate code for ESP32!
 
@@ -574,9 +546,7 @@ Testing the Zig C compiler again, we can now generate code for ESP32!
 $ROOTDIR/out/zig-$TARGET-$MCPU/zig cc -S -O1 test.c -target xtensa-freestanding-none -mcpu=esp32
 ```
 
-But, I didn't want to write C.
-I wanted to write Zig for ESP32, so I needed to verify whether the current Zig compiler can compile Zig code and generate machine code for ESP32.
-
+Now we test Zig code compilation for ESP32.
 I created a `test.zig` file that is very similar to the `test.c` file:
 
 ```zig
@@ -585,13 +555,13 @@ pub fn add(a: i32, b: i32) i32 {
 }
 ```
 
-I compiled the code using `build-obj` command.
+Then I used the `build-obj` command and `-femit-asm` flag to emit an assembly file.
 
 ```
 $ROOTDIR/out/zig-$TARGET-$MCPU/zig build-obj -femit-asm test.zig -target xtensa-freestanding-none -mcpu=esp32
 ```
 
-But, that command yielded different kind of error
+It produced the following error instead of object and assembly file.
 
 ```
 error: LLVM failed to emit bin=test.o.o ir=(none): TargetMachine can't emit an object file
@@ -604,8 +574,7 @@ error: sub-compilation of compiler_rt failed
     note: LLVM failed to emit asm=(none) bin=/Users/alwin/.cache/zig/o/f668107cca09af86409f928796acbde8/libcompiler_rt.a.o ir=(none) bc=(none): TargetMachine can't emit an object file
 ```
 
-This again led me to headaches and more exploration on the Zig source code until I stumbled upon the `src/codegen` folder.
-I opened the `llvm.zig` code in that directory and searched the entire code with `xtensa` keyword until I found something interesting.
+I looked at the `src/codegen/llvm.zig` file and search for `xtensa` until I found the following snippet:
 
 ```zig
 pub fn initializeLLVMTarget(arch: std.Target.Cpu.Arch) void {
@@ -625,9 +594,11 @@ pub fn initializeLLVMTarget(arch: std.Target.Cpu.Arch) void {
 }
 ```
 
-Then it clicked!
-Of course there's no LLVMInitializeXtensaAsmPrinter on the LLVM upstream repository!
-So I go on and changed that switch case into
+This function initializes LLVM target for the specific architecture.
+In this case, the Zig code generation feature initializes the Xtensa target and the `LLVMInitializeXtensaAsmPrinter` function was not called.
+This caused the code generation to fail.
+
+The `llvm.LLVMInitializeXtensaAsmPrinter();` is added to the code.
 
 ```zig
         .xtensa => {
@@ -641,30 +612,24 @@ So I go on and changed that switch case into
         },
 ```
 
-I tried the last step of the entire build process again to rebuild the Zig with the previous changes.
-But it produced error
+Attempting to rebuilt the Zig toolchain caused the following error:
 
 ```
 src/codegen/llvm.zig:13020:21: error: root source file struct 'codegen.llvm.bindings' has no member named 'LLVMInitializeXtensaAsmPrinter'
                 llvm.LLVMInitializeXtensaAsmPrinter();
 ```
 
-I opened the `src/codegen/llvm/bindings.zig` file and found that indeed there was no
-`LLVMInitializeXtensaAsmPrinter()` member function.
-I added the following line to that file:
+The bindings in `src/codegen/llvm/bindings.zig` is missing an external function declaration to the `LLVMInitializeXtensaAsmPrinter` function.
 
 ```zig
 pub extern fn LLVMInitializeXtensaAsmPrinter() void;
 ```
 
-I repeated the final step and tried to compile the Zig code for ESP32 for one last time.
-And, it succeed!
+With these changes in place, we can have a working Zig toolchain that compiles Zig code for ESP32.
 
 ```
 $ROOTDIR/out/zig-$TARGET-$MCPU/zig build-obj -femit-asm test.zig -target xtensa-freestanding-none -mcpu=esp32
 ```
-
-Now I have a working Zig toolchain that can compile Zig code for ESP32!
 
 ## Summary: Required Changes to Support Xtensa ESP32
 
