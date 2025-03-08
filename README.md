@@ -212,7 +212,7 @@ add:                                    # @add
 
 This issue is related with how Zig implements the code generation for specific target such as Xtensa for both C and Zig code compilation.
 
-Then we used the Zig cross compiler to build the. zstd and zlib as static libraries for re-building LLVM later on.
+Then we used the Zig cross compiler to build the zstd and zlib as static libraries for re-building LLVM later on.
 
 ```sh
 # Now we have Zig as a cross compiler.
